@@ -979,7 +979,7 @@ func (c *calibration280) compensateTempFloat(raw int32) (float64, int32) {
 	return float64((x + y) / 5120.), tFine
 }
 
-// compensateHumidityFloat returns pressure in Pa. Output value of "96386.2"
+// compensatePressureFloat returns pressure in Pa. Output value of "96386.2"
 // equals 96386.2 Pa = 963.862 hPa.
 //
 // raw has 20 bits of resolution.

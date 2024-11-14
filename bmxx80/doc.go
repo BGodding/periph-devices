@@ -2,7 +2,7 @@
 // Use of this source code is governed under the Apache License, Version 2.0
 // that can be found in the LICENSE file.
 
-// Package bmxx80 controls a Bosch BMP180/BME280/BMP280 device over I²C, or SPI
+// Package bmxx80 controls a Bosch BMP180/BME280/BMP280/BMP680/BMP688 device over I²C, or SPI
 // for the BMx280.
 //
 // # More details
@@ -14,11 +14,17 @@
 // The URLs tend to rot, visit https://www.bosch-sensortec.com if they become
 // invalid.
 //
+// BME688:
+// https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme688-ds000.pdf
+//
+// BME680:
+// https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme680-ds001.pdf
+//
 // BME280:
-// https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BME280_DS001-12.pdf
+// https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme280-ds002.pdf
 //
 // BMP280:
-// https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BMP280-DS001-19.pdf
+// https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bmp280-ds001.pdf
 //
 // BMP180:
 // https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BMP180-DS000-12.pdf
@@ -34,4 +40,9 @@
 // wrong. It looks like the original authors used non-integer calculations and
 // some numbers were rounded. Take the results of the calculations with a grain
 // of salt.
+
+// C Reference code can be found from Bosh at https://github.com/boschsensortec
+// which can be useful for transpiling or clarifying operation
+// https://github.com/boschsensortec/BME68x_SensorAPI
+// https://github.com/boschsensortec/BME280_SensorAPI
 package bmxx80

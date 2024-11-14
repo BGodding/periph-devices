@@ -65,9 +65,10 @@ func (d *Dev) isIdle280() (bool, error) {
 type mode byte
 
 const (
-	sleep  mode = 0 // no operation, all registers accessible, lowest power, selected after startup
-	forced mode = 1 // perform one measurement, store results and return to sleep mode
-	normal mode = 3 // perpetual cycling of measurements and inactive periods
+	sleep    mode = 0 // no operation, all registers accessible, lowest power, selected after startup
+	forced   mode = 1 // perform one measurement, store results and return to sleep mode
+	parallel mode = 2 // bme688 only, perpetual cycling of measurements and inactive periods
+	normal   mode = 3 // perpetual cycling of measurements and inactive periods
 )
 
 // standby is the time the BMx280 waits idle between measurements. This reduces

@@ -100,6 +100,10 @@ const (
 	F4       Filter = 2
 	F8       Filter = 3
 	F16      Filter = 4
+	// F32, F64, and F128 are only supported on BME68x devices
+	F32  Filter = 5
+	F64  Filter = 6
+	F128 Filter = 8
 )
 
 // DefaultOpts is the recommended default options.
@@ -209,6 +213,7 @@ func NewSPI(p spi.Port, opts *Opts) (*Dev, error) {
 type Dev struct {
 	d         conn.Conn
 	isSPI     bool
+	is68x     bool
 	is280     bool
 	isBME     bool
 	opts      Opts
@@ -217,6 +222,7 @@ type Dev struct {
 	os        uint8
 	cal180    calibration180
 	cal280    calibration280
+	cal68x    calibration68x
 
 	mu   sync.Mutex
 	stop chan struct{}
@@ -238,7 +244,22 @@ func (d *Dev) Sense(e *physic.Env) error {
 		return d.wrap(errors.New("already sensing continuously"))
 	}
 
-	if d.is280 {
+	if d.is68x {
+		err := d.writeCommands([]byte{
+			// ctrl_meas
+			0x74, byte(d.opts.Temperature)<<5 | byte(d.opts.Pressure)<<2 | byte(forced),
+		})
+		if err != nil {
+			return d.wrap(err)
+		}
+		doSleep(d.measDelay)
+		//for idle := false; !idle; {
+		//	if idle, err = d.isIdle680(); err != nil {
+		//		return d.wrap(err)
+		//	}
+		//}
+		return d.sense68x(e)
+	} else if d.is280 {
 		// Skip setting mode to forced if we are already in normal mode
 		if d.opts.Filter == NoFilter || d.opts.Standby == 0 {
 			err := d.writeCommands([]byte{
@@ -278,7 +299,18 @@ func (d *Dev) SenseContinuous(interval time.Duration) (<-chan physic.Env, error)
 		d.wg.Wait()
 	}
 
-	if d.is280 {
+	if d.is68x {
+		s := chooseStandby(d.isBME, interval-d.measDelay)
+		err := d.writeCommands([]byte{
+			// config
+			0x75, byte(s)<<5 | byte(d.opts.Filter)<<2,
+			// ctrl_meas
+			0x74, byte(d.opts.Temperature)<<5 | byte(d.opts.Pressure)<<2 | byte(normal),
+		})
+		if err != nil {
+			return nil, d.wrap(err)
+		}
+	} else if d.is280 {
 		s := chooseStandby(d.isBME, interval-d.measDelay)
 		err := d.writeCommands([]byte{
 			// config
@@ -332,7 +364,15 @@ func (d *Dev) Halt() error {
 	d.stop = nil
 	d.wg.Wait()
 
-	if d.is280 {
+	if d.is68x {
+		// Page 27 (for register) and 12~13 section 3.3.
+		return d.writeCommands([]byte{
+			// config
+			0x75, byte(s1s)<<5 | byte(NoFilter)<<2,
+			// ctrl_meas
+			0x74, byte(d.opts.Temperature)<<5 | byte(d.opts.Pressure)<<2 | byte(sleep),
+		})
+	} else if d.is280 {
 		// Page 27 (for register) and 12~13 section 3.3.
 		return d.writeCommands([]byte{
 			// config
@@ -344,7 +384,16 @@ func (d *Dev) Halt() error {
 	return nil
 }
 
-//
+func dumpByteSlice(b []byte) {
+	n := (len(b) + 15) &^ 15
+	for i := 0; i < n; i++ {
+		if i < len(b) {
+			fmt.Printf(" 0x%02X,", b[i])
+		} else {
+			fmt.Print("   ")
+		}
+	}
+}
 
 func (d *Dev) makeDev(opts *Opts) error {
 	d.opts = *opts
@@ -370,6 +419,10 @@ func (d *Dev) makeDev(opts *Opts) error {
 		d.name = "BME280"
 		d.is280 = true
 		d.isBME = true
+	case 0x61:
+		d.name = "BME68X"
+		d.is68x = true
+		d.isBME = true
 	default:
 		return fmt.Errorf("bmxx80: unexpected chip id %x", chipID[0])
 	}
@@ -380,6 +433,7 @@ func (d *Dev) makeDev(opts *Opts) error {
 	}
 
 	if d.is280 {
+		// TODO: Enforce max filter on the 280 devices
 		// TODO(maruel): We may want to wait for isIdle280().
 		// Read calibration data t1~3, p1~9, 8bits padding, h1.
 		var tph [0xA2 - 0x88]byte
@@ -430,6 +484,42 @@ func (d *Dev) makeDev(opts *Opts) error {
 			}
 		}
 		return d.writeCommands(b)
+	} else if d.is68x {
+		filter := NoFilter
+		startingMode := sleep
+		if d.opts.Filter != NoFilter {
+			filter = d.opts.Filter
+			startingMode = parallel
+		}
+		// Read calibration data t2~3, p1~10, 8bits padding, h1.
+		var tph [0xA1 - 0x8a]byte
+		if err := d.readReg(0x8a, tph[:]); err != nil {
+			return err
+		}
+		// dumpByteSlice(tph[:])
+		// Read calibration data h1~7. t1
+		var h [0xEB - 0xE1]byte
+		if err := d.readReg(0xE1, h[:]); err != nil {
+			return err
+		}
+		d.cal68x = newCalibration68x(tph[:], h[:])
+		var b []byte
+		if d.isBME {
+			b = []byte{
+				// ctrl_hum
+				0x72, byte(d.opts.Humidity),
+				// ctrl_meas; put it to sleep otherwise the config update may be
+				// ignored. This is really just in case the device was somehow put
+				// into normal but was not Halt'ed.
+				0x74, byte(d.opts.Temperature)<<5 | byte(d.opts.Pressure)<<2 | byte(sleep),
+
+				// config
+				0x75, byte(filter) << 2,
+				// As per page 25, ctrl_meas must be re-written last.
+				0x74, byte(d.opts.Temperature)<<5 | byte(d.opts.Pressure)<<2 | byte(startingMode),
+			}
+		}
+		return d.writeCommands(b)
 	}
 	// Read calibration data.
 	dev := mmr.Dev8{Conn: d.d, Order: binary.BigEndian}
@@ -451,7 +541,9 @@ func (d *Dev) sensingContinuous(interval time.Duration, sensing chan<- physic.En
 		// Do one initial sensing right away.
 		e := physic.Env{}
 		d.mu.Lock()
-		if d.is280 {
+		if d.is68x {
+			err = d.sense68x(&e)
+		} else if d.is280 {
 			err = d.sense280(&e)
 		} else {
 			err = d.sense180(&e)
@@ -474,6 +566,7 @@ func (d *Dev) sensingContinuous(interval time.Duration, sensing chan<- physic.En
 	}
 }
 
+// TODO: To support BME68x we need to add page support to this function....
 func (d *Dev) readReg(reg uint8, b []byte) error {
 	// Page 32-33
 	if d.isSPI {
